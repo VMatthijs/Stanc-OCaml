@@ -8,6 +8,8 @@ module type SYMBOL = sig
   val enter : 'a state-> string -> 'a -> unit
 
   val look : 'a state -> string -> 'a option
+  
+  val look_all : 'a state -> string -> 'a list
 
   val begin_scope : 'a state -> unit
 

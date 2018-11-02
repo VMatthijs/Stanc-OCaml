@@ -9,6 +9,8 @@ module type SYMBOL = sig
 
   val look : 'a state -> string -> 'a option
 
+  val look_all : 'a state -> string -> 'a list
+
   val begin_scope : 'a state -> unit
 
   val end_scope : 'a state -> unit
@@ -24,8 +26,10 @@ module Symbol : SYMBOL = struct
   (* We just pick some initial size. Hash tables get resized dynamically if necessary, so it doesn't hugely matter. *)
   let enter s str ty = Hashtbl.add s.table str ty ; Stack.push str s.stack
 
-  (* recall that OCaml hash tables store a stack of all the values for each key; this would allow us to use shadowing; if we don't want shadowing we can add an extra check here. *)
   let look s str = Hashtbl.find_opt s.table str
+
+  (* recall that OCaml hash tables store a stack of all the values for each key; this allows us to deal with overloading. *)
+  let look_all s str = Hashtbl.find_all s.table str
 
   let begin_scope s = Stack.push "-sentinel-new-scope-" s.stack
 
