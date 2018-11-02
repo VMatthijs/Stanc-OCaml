@@ -1,7 +1,67 @@
 (* Abstract syntax. *)
 open Core_kernel
 
-(* for auto generating s-exp *)
+(* for auto generating s-exp, compare *)
+
+(* Some unsized/return types -- we define these separately first, as we want to
+   be able to use sets of them in the following, so we need to derive a
+   comparison operator; we manually define comparison and sexp operations
+   on these sets as Jane Street has not automated this  *)
+type argblock = Data | Any
+
+and returntype = Void | ReturnType of unsizedtype
+
+and unsizedtype =
+  | Int
+  | Real
+  | Vector
+  | RowVector
+  | Matrix
+  | Array of unsizedtype
+  | Fun of (argblock * unsizedtype) list * returntype
+[@@deriving sexp, compare]
+
+module Set_Of_UnsizedType = Stdlib.Set.Make (struct
+  let compare = compare_unsizedtype
+
+  type t = unsizedtype
+end)
+
+type set_of_unsizedtype = Set_Of_UnsizedType.t
+
+type list_of_unsizedtype = unsizedtype list [@@deriving sexp, compare]
+
+let sexp_of_set_of_unsizedtype s =
+  sexp_of_list_of_unsizedtype (Set_Of_UnsizedType.elements s)
+
+let set_of_unsizedtype_of_sexp s =
+  Set_Of_UnsizedType.of_list (list_of_unsizedtype_of_sexp s)
+
+let compare_set_of_unsizedtype s1 s2 =
+  compare_list_of_unsizedtype
+    (Set_Of_UnsizedType.elements s1)
+    (Set_Of_UnsizedType.elements s2)
+
+module Set_Of_ReturnType = Stdlib.Set.Make (struct
+  let compare = compare_returntype
+
+  type t = returntype
+end)
+
+type set_of_returntype = Set_Of_ReturnType.t
+
+type list_of_returntype = returntype list [@@deriving sexp, compare]
+
+let sexp_of_set_of_returntype s =
+  sexp_of_list_of_returntype (Set_Of_ReturnType.elements s)
+
+let set_of_returntype_of_sexp s =
+  Set_Of_ReturnType.of_list (list_of_returntype_of_sexp s)
+
+let compare_set_of_returntype s1 s2 =
+  compare_list_of_returntype
+    (Set_Of_ReturnType.elements s1)
+    (Set_Of_ReturnType.elements s2)
 
 (* Programs. *)
 type program =
@@ -38,20 +98,7 @@ and fundef =
 
 and identifier = string
 
-and argblock = Data | Any
-
 and argdecl = argblock * unsizedtype * identifier
-
-and returntype = Void | ReturnType of unsizedtype
-
-and unsizedtype =
-  | Int
-  | Real
-  | Vector
-  | RowVector
-  | Matrix
-  | Array of unsizedtype
-  | Fun of (argblock * unsizedtype) list * returntype
 
 and topvardecl = sizedtype * transformation * identifier
 
@@ -100,7 +147,7 @@ and transformation =
   | Covariance
 
 (* Expressions. *)
-and expression = untypedexpression * unsizedtype option
+and expression = untypedexpression * set_of_unsizedtype
 
 and untypedexpression =
   | Conditional of expression * expression * expression
@@ -146,7 +193,7 @@ and postfixop = Transpose
 and printable = PString of string | PExpr of expression
 
 (* Statements. *)
-and statement = untypedstatement * returntype option
+and statement = untypedstatement * set_of_returntype
 
 and untypedstatement =
   | Assignment of lhs * assignmentoperator * expression

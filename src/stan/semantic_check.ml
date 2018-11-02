@@ -102,6 +102,9 @@ let context_flags =
   ; in_loop= false }
 
 (* Some helper functions *)
+let set_map_unsizedtype_to_returntype f s =
+  Set_Of_ReturnType.of_list (List.map f (Set_Of_UnsizedType.elements s))
+
 let dup_exists l =
   let rec dup_consecutive = function
     | [] | [_] -> false
@@ -127,23 +130,35 @@ let look_block id = Core_kernel.Option.map (Symbol.look vm id) snd
 
 (* TODO: generalize this to arbitrary expressions? *)
 
-let check_of_int_type e = match snd e with Some Int -> true | _ -> false
+let check_of_int_type e =
+  match Set_Of_UnsizedType.elements (snd e) with [Int] -> true | _ -> false
 
-let check_of_real_type e = match snd e with Some Real -> true | _ -> false
+let check_of_real_type e =
+  match Set_Of_UnsizedType.elements (snd e) with [Real] -> true | _ -> false
 
 let check_of_int_or_real_type e =
-  match snd e with Some Int -> true | Some Real -> true | _ -> false
+  match Set_Of_UnsizedType.elements (snd e) with
+  | [Real] -> true
+  | [Int] -> true
+  | [Real; Int] -> true
+  | [Int; Real] -> true
+  | _ -> false
 
 (* TODO!!! *)
 let check_compatible_indices e lindex = true
 
 let check_of_same_type_mod_conv e1 e2 =
-  match snd e1 with
-  | Some t1 -> (
-    match snd e2 with
-    | Some t2 -> t1 = t2 || (t1 = Real && t1 = Int) || (t1 = Int && t1 = Real)
-    | _ -> false )
-  | _ -> false
+  let map_int_to_real =
+    Set_Of_UnsizedType.map (function Int -> Real | x -> x)
+  in
+  if
+    not
+      (Set_Of_UnsizedType.is_empty
+         (Set_Of_UnsizedType.inter
+            (map_int_to_real (snd e1))
+            (map_int_to_real (snd e2))))
+  then true
+  else false
 
 (* TODO: insert positions into semantic errors! *)
 
@@ -242,7 +257,7 @@ and semantic_check_fundef = function
       let _ = Symbol.begin_scope vm in
       let ub = semantic_check_statement b in
       let _ =
-        if snd ub <> Some urt then
+        if Set_Of_ReturnType.mem urt (snd ub) then
           semantic_error
             "Function bodies must contain a return statement of correct type \
              in every branch."
@@ -317,9 +332,10 @@ and semantic_check_compound_topvardecl_assign = function
   | {sizedtype= st; transformation= trans; identifier= id; value= e} -> (
       let ust, utrans, uid = semantic_check_topvardecl (st, trans, id) in
       match
-        semantic_check_statement (Assignment ((uid, []), Assign, e), None)
+        semantic_check_statement
+          (Assignment ((uid, []), Assign, e), Set_Of_ReturnType.empty)
       with
-      | Assignment ((uid, _), Assign, ue), Some Void ->
+      | Assignment ((uid, _), Assign, ue), _ ->
           TVDeclAss
             {sizedtype= ust; transformation= utrans; identifier= uid; value= ue}
       | _ -> semantic_error "This should never happen. Please file a bug.." )
@@ -347,9 +363,10 @@ and semantic_check_compound_vardecl_assign = function
   | {sizedtype= st; identifier= id; value= e} -> (
       let ust, uid = semantic_check_vardecl (st, id) in
       match
-        semantic_check_statement (Assignment ((uid, []), Assign, e), None)
+        semantic_check_statement
+          (Assignment ((uid, []), Assign, e), Set_Of_ReturnType.empty)
       with
-      | Assignment ((uid, _), Assign, ue), Some Void ->
+      | Assignment ((uid, _), Assign, ue), _ ->
           VDeclAss {sizedtype= ust; identifier= uid; value= ue}
       | _ -> semantic_error "This should never happen. Please file a bug." )
 
@@ -464,7 +481,7 @@ If two brances of else return different, then throw.
 Return type of list is the first return type encountered.
 At return here, check that it matches the specified type. *)
 (* TODO: should throw if NRFunapp of returning function *)
-and semantic_check_expression e = (fst e, Some Int)
+and semantic_check_expression e = (fst e, Set_Of_UnsizedType.singleton Int)
 
 (* Probably nothing to do here *)
 and semantic_check_infixop i = i
@@ -477,11 +494,14 @@ and semantic_check_postfixop p = p
 
 and semantic_check_printable = function
   | PString s -> PString s
-  | PExpr e -> (
+  | PExpr e ->
       let ue = semantic_check_expression e in
-      match snd ue with
-      | Some (Fun _) -> semantic_error "Functions cannot be printed."
-      | _ -> PExpr ue )
+      if
+        Set_Of_UnsizedType.exists
+          (function Fun (_, _) -> true | _ -> false)
+          (snd ue)
+      then semantic_error "Functions cannot be printed."
+      else PExpr ue
 
 (* function
   | Assignment (lhs, assop, e) ->
@@ -515,13 +535,15 @@ and semantic_check_statement s =
       let ue = semantic_check_expression e in
       let ue2 =
         semantic_check_expression
-          (Indexed ((Variable uid, None), ulindex), None)
+          ( Indexed ((Variable uid, Set_Of_UnsizedType.empty), ulindex)
+          , Set_Of_UnsizedType.empty )
       in
       let _ =
         if not (check_of_same_type_mod_conv ue ue2) then
           semantic_error "Type mismatch in assignment"
       in
-      (Assignment ((uid, ulindex), uassop, ue), Some Void)
+      ( Assignment ((uid, ulindex), uassop, ue)
+      , Set_Of_ReturnType.singleton Void )
   | NRFunApp (id, es) ->
       let uid = semantic_check_identifier id in
       let ues = List.map semantic_check_expression es in
@@ -535,13 +557,13 @@ and semantic_check_statement s =
         if not context_flags.in_loop then
           semantic_error "Break statements may only be used in loops."
       in
-      (Break, Some Void)
+      (Break, Set_Of_ReturnType.singleton Void)
   | Continue ->
       let _ =
         if not context_flags.in_loop then
           semantic_error "Continue statements may only be used in loops."
       in
-      (Continue, Some Void)
+      (Continue, Set_Of_ReturnType.singleton Void)
   | Return e ->
       let _ =
         if not context_flags.in_returning_fun_def then
@@ -550,10 +572,11 @@ and semantic_check_statement s =
              definitions."
       in
       let ue = semantic_check_expression e in
-      (Return ue, Core_kernel.Option.map (snd ue) (fun x -> ReturnType x))
+      ( Return ue
+      , set_map_unsizedtype_to_returntype (fun x -> ReturnType x) (snd ue) )
   | Print ps -> semantic_error "not implemented"
   | Reject ps -> semantic_error "not implemented"
-  | Skip -> (Skip, Some Void)
+  | Skip -> (Skip, Set_Of_ReturnType.singleton Void)
   | IfElse (e, s1, s2) -> semantic_error "not implemented"
   | While (e, s) -> semantic_error "not implemented"
   | For {loop_variable= id; lower_bound= e1; upper_bound= e2; loop_body= s} ->
@@ -588,7 +611,9 @@ and semantic_check_truncation = function
 
 and semantic_check_lhs (id, lindex) =
   match
-    semantic_check_expression (Indexed ((Variable id, None), lindex), None)
+    semantic_check_expression
+      ( Indexed ((Variable id, Set_Of_UnsizedType.empty), lindex)
+      , Set_Of_UnsizedType.empty )
   with
   | Indexed ((Variable uid, _), ulindex), _ -> (uid, ulindex)
   | _ -> semantic_error "This should never happen. Please file a bug."

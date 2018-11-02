@@ -276,9 +276,9 @@ loc_scale:
   | LOCATION ASSIGN e1=constr_expression COMMA SCALE ASSIGN e2=constr_expression
     { grammar_logger "loc_scale" ; LocationScale (e1, e2) }
   | LOCATION ASSIGN e=constr_expression
-    {  grammar_logger "loc" ; LocationScale (e, (RealNumeral "1.", None)) }
+    {  grammar_logger "loc" ; LocationScale (e, (RealNumeral "1.", Set_Of_UnsizedType.empty)) }
   | SCALE ASSIGN e=constr_expression
-    { grammar_logger "scale" ; LocationScale ((RealNumeral "0.", None), e) }
+    { grammar_logger "scale" ; LocationScale ((RealNumeral "0.", Set_Of_UnsizedType.empty), e) }
 
 dims:
   | LBRACK l=sep_list(expression, COMMA) RBRACK
@@ -289,10 +289,10 @@ expression:
   | l=lhs
     { 
       grammar_logger "lhs_expression" ;
-      (Indexed ((Variable (fst l), None), snd l), None)
+      (Indexed ((Variable (fst l), Set_Of_UnsizedType.empty), snd l), Set_Of_UnsizedType.empty)
     }
   | e=non_lhs
-    { grammar_logger "non_lhs_expression" ; (e, None)}
+    { grammar_logger "non_lhs_expression" ; (e, Set_Of_UnsizedType.empty)}
 
 non_lhs: (* to avoid shift/reduce conflict with lhs when doing assignments *)
   | e1=expression QMARK e2=expression COLON e3=expression 
@@ -304,7 +304,7 @@ non_lhs: (* to avoid shift/reduce conflict with lhs when doing assignments *)
   | e=expression op=postfixOp 
     { grammar_logger "postfix_expr" ; PostfixOp (e, op)}
   | ue=non_lhs LBRACK i=indexes RBRACK 
-    {  grammar_logger "expression_indexed" ; Indexed ((ue, None), i)}
+    {  grammar_logger "expression_indexed" ; Indexed ((ue, Set_Of_UnsizedType.empty), i)}
   | e=common_expression 
     { grammar_logger "common_expr" ; e }
 
@@ -313,18 +313,18 @@ constr_expression:
   | e1=constr_expression op=arithmeticInfixOp e2=constr_expression 
     { 
       grammar_logger "constr_expression_arithmetic" ;
-      (InfixOp (e1, op, e2), None)
+      (InfixOp (e1, op, e2), Set_Of_UnsizedType.empty)
     }
   | op=prefixOp e=constr_expression %prec unary_over_binary 
-    {  grammar_logger "constr_expression_prefixOp" ; (PrefixOp (op, e), None) }
+    {  grammar_logger "constr_expression_prefixOp" ; (PrefixOp (op, e), Set_Of_UnsizedType.empty) }
   | e=constr_expression op=postfixOp 
-    {  grammar_logger "constr_expression_postfix" ; (PostfixOp (e, op), None) }
+    {  grammar_logger "constr_expression_postfix" ; (PostfixOp (e, op), Set_Of_UnsizedType.empty) }
   | e=constr_expression LBRACK i=indexes RBRACK 
-    {  grammar_logger "constr_expression_indexed" ; (Indexed (e, i), None) }
+    {  grammar_logger "constr_expression_indexed" ; (Indexed (e, i), Set_Of_UnsizedType.empty) }
   | e=common_expression 
-    {  grammar_logger "constr_expression_common_expr" ; (e, None) }
+    {  grammar_logger "constr_expression_common_expr" ; (e, Set_Of_UnsizedType.empty) }
   | id=IDENTIFIER 
-    { grammar_logger "constr_expression_identifier" ; (Variable id, None) }
+    { grammar_logger "constr_expression_identifier" ; (Variable id, Set_Of_UnsizedType.empty) }
 
 common_expression:
   | i=INTNUMERAL 
@@ -437,9 +437,9 @@ lhs:
 (* statements *)
 statement:
   | s=atomic_statement   
-    {  grammar_logger "atomic_statement" ; (s, None) }
+    {  grammar_logger "atomic_statement" ; (s, Set_Of_ReturnType.empty) }
   | s=nested_statement 
-    {  grammar_logger "nested_statement" ; (s, None) }
+    {  grammar_logger "nested_statement" ; (s, Set_Of_ReturnType.empty) }
 
 atomic_statement:
   | l=lhs op=assignment_op e=expression SEMICOLON  
@@ -498,7 +498,7 @@ nested_statement:
   | IF LPAREN e=expression RPAREN s1=statement ELSE s2=statement 
     {  grammar_logger "ifelse_statement" ; IfElse (e, s1, s2) }
   | IF LPAREN e=expression RPAREN s=statement %prec below_ELSE 
-    {  grammar_logger "if_statement" ; IfElse (e, s, (Skip, None)) }
+    {  grammar_logger "if_statement" ; IfElse (e, s, (Skip, Set_Of_ReturnType.empty)) }
   | WHILE LPAREN e=expression RPAREN s=statement 
     {  grammar_logger "while_statement" ; While (e, s) }
   | FOR LPAREN id=IDENTIFIER IN e1=expression COLON e2=expression RPAREN
