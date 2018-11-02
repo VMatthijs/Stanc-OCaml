@@ -34,6 +34,7 @@ In case of void function, no return statements anywhere
 All function arguments are distinct
 Function applications are returning functions
 NRFunction applications are non-returning functions
+No overloading in user defined functions
 *)
 
 (*
@@ -82,6 +83,11 @@ type var_origin = Functions | Data | TData | Param | TParam | Model | GQuant
    2) some context flags context_flags, to communicate information down
       the AST   *)
 let vm = Symbol.initialize ()
+
+let _ =
+  Symbol.enter vm "foo" (Functions, Fun ([(Data, Int); (Any, Real)], Void))
+
+let _ = Symbol.enter vm "foo" (Functions, Fun ([(Any, Int)], ReturnType Real))
 
 (* TODO: first load whole math library into the *)
 
@@ -147,7 +153,7 @@ let check_of_int_or_real_type e =
 (* TODO!!! *)
 let check_compatible_indices e lindex = true
 
-let check_of_same_type_mod_conv e1 e2 =
+let is_valid_assignment e1 e2 =
   let map_int_to_real =
     Set_Of_UnsizedType.map (function Int -> Real | x -> x)
   in
@@ -464,7 +470,7 @@ and semantic_check_transformation = function
 (*(function
   | Conditional (e1, e2, e3) ->
       if check_of_int_type e1 then
-        if check_of_same_type_mod_conv e2 e3 then
+        if is_valid_assignment e2 e3 then
           Conditional
             ( semantic_check_expression e1
             , semantic_check_expression e2
@@ -506,7 +512,7 @@ and semantic_check_printable = function
 (* function
   | Assignment (lhs, assop, e) ->
       if
-        check_of_same_type_mod_conv
+        is_valid_assignment
           (Indexed (Variable (fst lhs), snd lhs))
           e
         (* TODO: This is probably too simplified. Go over all compound assignment operators to check their signature. *)
@@ -533,13 +539,13 @@ and semantic_check_statement s =
       let uid, ulindex = semantic_check_lhs (id, lindex) in
       let uassop = semantic_check_assignmentoperator assop in
       let ue = semantic_check_expression e in
-      let ue2 =
+      let ue_lhs =
         semantic_check_expression
           ( Indexed ((Variable uid, Set_Of_UnsizedType.empty), ulindex)
           , Set_Of_UnsizedType.empty )
       in
       let _ =
-        if not (check_of_same_type_mod_conv ue ue2) then
+        if not (is_valid_assignment ue_lhs ue) then
           semantic_error "Type mismatch in assignment"
       in
       ( Assignment ((uid, ulindex), uassop, ue)
@@ -547,7 +553,20 @@ and semantic_check_statement s =
   | NRFunApp (id, es) ->
       let uid = semantic_check_identifier id in
       let ues = List.map semantic_check_expression es in
-      semantic_error "not implemented"
+      let possible_identifier_types =
+        Set_Of_UnsizedType.of_list (List.map snd (Symbol.look_all vm uid))
+      in
+      let legal_types_given_arguments = (Fun (void)) in
+      let _ =
+        if
+          not
+            (Set_Of_UnsizedType.is_empty
+               (Set_Of_UnsizedType.inter possible_identifier_types
+                  legal_types_given_arguments))
+        then
+          semantic_error "Type mismatch in non-returning function application"
+      in
+      (NRFunApp (uid, ues), Set_Of_ReturnType.singleton Void)
   | TargetPE e -> semantic_error "not implemented"
   | IncrementLogProb e -> semantic_error "not implemented"
   | Tilde {arg= e; distribution= id; args= es; truncation= t} ->
