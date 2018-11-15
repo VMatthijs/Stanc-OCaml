@@ -1,17 +1,13 @@
-(* This file contains all the common code used by the languages implemented in the PL Zoo. *)
+(* This file contains some generic code for a command line application compiler. *)
 
 type location =
   | Location of Lexing.position * Lexing.position (** delimited location *)
   | Nowhere (** no location *)
 
-type 'a located = { data : 'a ; loc : location }
-
 let make_location loc1 loc2 = Location (loc1, loc2)
 
 let location_of_lex lex =
   Location (Lexing.lexeme_start_p lex, Lexing.lexeme_end_p lex)
-
-let locate ?(loc=Nowhere) x = { data = x; loc = loc }
 
 (** Exception [Error (loc, err, msg)] indicates an error of type [err] with error message
     [msg], occurring at location [loc]. *)
@@ -25,18 +21,6 @@ let error ?(kind="Error") ?(loc=Nowhere) =
       raise (Error (loc, kind, msg))
   in
     Format.kfprintf k Format.str_formatter
-
-let print_parens ?(max_level=9999) ?(at_level=0) ppf =
-  if max_level < at_level then
-    begin
-      Format.fprintf ppf "(@[" ;
-      Format.kfprintf (fun ppf -> Format.fprintf ppf "@])") ppf
-    end
-  else
-    begin
-      Format.fprintf ppf "@[" ;
-      Format.kfprintf (fun ppf -> Format.fprintf ppf "@]") ppf
-    end
 
 let print_location loc ppf =
   match loc with
@@ -72,8 +56,6 @@ let print_message ?(loc=Nowhere) msg_type =
 (** Print the caught error *)
 let print_error (loc, err_type, msg) = print_message ~loc err_type "%s" msg
 
-let print_info msg = Format.kfprintf (fun ppf -> Format.pp_print_flush ppf ()) Format.std_formatter msg
-
 module type LANGUAGE =
 sig
   val name : string
@@ -81,7 +63,6 @@ sig
   type environment
   val options : (Arg.key * Arg.spec * Arg.doc) list
   val initial_environment : environment
-  val read_more : string -> bool
   val file_parser : (Lexing.lexbuf -> command list) option
   val toplevel_parser : (Lexing.lexbuf -> command) option
   val exec : environment -> command -> environment
@@ -89,9 +70,6 @@ end
 
 module Main (L : LANGUAGE) =
 struct
-
-  (** Should the interactive shell be run? *)
-  let interactive_shell = ref true
 
   (** The command-line wrappers that we look for. *)
   let wrapper = ref (Some ["rlwrap"; "ledit"])
@@ -109,7 +87,7 @@ struct
       be processed in interactive mode. *)
   let add_file interactive filename = (files := (filename, interactive) :: !files)
 
-  (** Command-line options *)
+  (** Some example command-line options here *)
   let options = Arg.align ([
     ("--wrapper",
      Arg.String (fun str -> wrapper := Some [str]),
@@ -122,9 +100,6 @@ struct
        print_endline (L.name ^ " " ^ "(" ^ Sys.os_type ^ ")");
        exit 0),
      " Print language information and exit");
-    ("-n",
-     Arg.Clear interactive_shell,
-     " Do not run the interactive toplevel");
     ("-l",
      Arg.String (fun str -> add_file false str),
      "<file> Load <file> into the initial environment")
@@ -133,8 +108,7 @@ struct
 
   (** Treat anonymous arguments as files to be run. *)
   let anonymous str =
-    add_file true str;
-    interactive_shell := false
+    add_file true str
 
   (** Parse the contents from a file, using a given [parser]. *)
   let read_file parser fn =
@@ -152,18 +126,6 @@ struct
   with
     (* Any errors when opening or closing a file are fatal. *)
     Sys_error msg -> fatal_error "%s" msg
-
-  (** Parse input from toplevel, using the given [parser]. *)
-  let read_toplevel parser () =
-    let prompt = L.name ^ "> "
-    and prompt_more = String.make (String.length L.name) ' ' ^ "> " in
-    print_string prompt ;
-    let str = ref (read_line ()) in
-      while L.read_more !str do
-        print_string prompt_more ;
-        str := !str ^ (read_line ()) ^ "\n"
-      done ;
-      parser (Lexing.from_string (!str ^ "\n"))
 
   (** Parser wrapper that catches syntax-related errors and converts them to errors. *)
   let wrap_syntax_errors parser lex =
@@ -184,55 +146,12 @@ struct
     | None ->
        fatal_error "Cannot load files, only interactive shell is available"
 
-  (** Interactive toplevel *)
-  let toplevel ctx =
-    let eof = match Sys.os_type with
-      | "Unix" | "Cygwin" -> "Ctrl-D"
-      | "Win32" -> "Ctrl-Z"
-      | _ -> "EOF"
-    in
-      let toplevel_parser =
-        match L.toplevel_parser with
-        | Some p -> p
-        | None -> fatal_error "I am sorry but this language has no interactive toplevel."
-      in
-      Format.printf "%s -- programming languages zoo@\n" L.name ;
-      Format.printf "Type %s to exit@." eof ;
-      try
-        let ctx = ref ctx in
-          while true do
-            try
-              let cmd = read_toplevel (wrap_syntax_errors toplevel_parser) () in
-                ctx := L.exec !ctx cmd
-            with
-              | Error err -> print_error err
-              | Sys.Break -> prerr_endline "Interrupted."
-          done
-      with End_of_file -> ()
-
   (** Main program *)
   let main () =
     (* Intercept Ctrl-C by the user *)
     Sys.catch_break true;
     (* Parse the arguments. *)
     Arg.parse options anonymous usage;
-    (* Attempt to wrap yourself with a line-editing wrapper. *)
-    if !interactive_shell then
-      begin match !wrapper with
-        | None -> ()
-        | Some lst ->
-          let n = Array.length Sys.argv + 2 in
-          let args = Array.make n "" in
-            Array.blit Sys.argv 0 args 1 (n - 2);
-            args.(n - 1) <- "--no-wrapper";
-            List.iter
-              (fun wrapper ->
-                try
-                  args.(0) <- wrapper;
-                  Unix.execvp wrapper args
-                with Unix.Unix_error _ -> ())
-              lst
-      end;
     (* Files were listed in the wrong order, so we reverse them *)
     files := List.rev !files;
     (* Set the maximum depth of pretty-printing, after which it prints ellipsis. *)
@@ -240,8 +159,7 @@ struct
     Format.set_ellipsis_text "..." ;
     try
       (* Run and load all the specified files. *)
-      let ctx = List.fold_left use_file L.initial_environment !files in
-        if !interactive_shell then toplevel ctx
+       let _ = List.fold_left use_file L.initial_environment !files in ()
     with
         Error err -> print_error err; exit 1
 end
