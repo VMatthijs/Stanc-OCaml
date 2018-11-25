@@ -1,3 +1,6 @@
+
+# NOTE: This repo has moved to https://github.com/stan-dev/stanc3.git !
+
 # A Starting Point for a New Stan Compiler
 This repo contains some initial work on a new compiler for Stan, written in OCaml.
 
